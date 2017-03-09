@@ -35,8 +35,6 @@ class WhatsUpServer(threading.Thread):
         self.conn = conn
         self.addr = addr
         self.ip = self.addr[0]
-
-        self.fake_ip_id = 'test'
         print(self.addr)
         self.name = ''
 
@@ -54,14 +52,9 @@ class WhatsUpServer(threading.Thread):
         clients.add((self.conn, self.addr))
         msg = '\n## Welcome to WhatsUp\n## Enter `!q` to quit\n'
 
-        fake_ip = self.conn.recv(BUF_SIZE).strip()
-        print("FAKE IP")
-        print(fake_ip)
-
         # new user
         print accounts
-        #if self.ip not in accounts:
-        if True:
+        if self.ip not in accounts:
             msg += '## Please enter your name:'
             self.print_indicator(msg)
             accounts[self.ip] = {
@@ -216,20 +209,13 @@ class WhatsUpServer(threading.Thread):
         return res
 
     def broadcast(self, msg, receivers, to_self=True):
-        print("broadcast")
-        print(receivers)
-
-
         for conn, addr in receivers:
             # if the client is not the current user
-            #if addr[0] != self.ip:
-            #    print("not current user")
-            #    conn.send(msg + '\n>> ')
+            if addr[0] != self.ip:
+                conn.send(msg + '\n>> ')
             # if current user
-            #else:
-            #    print("current user")
-            #    self.conn.send('>> ') if to_self else self.conn.send('')
-            conn.send(msg + '\n>> ')
+            else:
+                self.conn.send('>> ') if to_self else self.conn.send('')
 
     def run(self):
         global messages
