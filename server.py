@@ -4,10 +4,11 @@ import threading
 import time
 import logging
 import sys
+import traceback
 
 HOST = ''
 PORT = 8018
-TIMEOUT = 5
+TIMEOUT = 30
 BUF_SIZE = 16384
 
 #Input: None
@@ -115,7 +116,13 @@ class ChatServer(threading.Thread):
 
         if client.connected_client != None:
             client.connected_client.conn.send("*private* %s has disconnected from you. \n>>"%self.username)
-            client.connected_client = None
+        
+        client.connected_client = None
+
+        for c in clients:
+            if c.connected_client != None and c.connected_client.username == self.username and c.is_online == True:
+                c.conn.send("*private* %s has disconnected from you. \n>>"%self.username)
+                c.connected_client = None
         
         logging.info('Loggin Off %s:%s,username: %s' %(self.addr[0], self.addr[1],self.username))
         self.conn.send('## Bye!\n')
@@ -236,7 +243,8 @@ class ChatServer(threading.Thread):
             self.conn.send('>>')
         else:
             for c in clients:
-                c.conn.send(msg + '\n>>')
+                if c.is_online == True:
+                    c.conn.send(msg + '\n>>')
     #Input: self object
     #Output: None
     #Summary:
@@ -246,8 +254,6 @@ class ChatServer(threading.Thread):
         global clients
 
         self.login()
-
-        print("login done")
 
         while 1:
             try:
@@ -351,6 +357,7 @@ def main():
         try:
             conn, addr = sock.accept()
             server = ChatServer(conn, addr)
+            server.daemon = True
             server.start()
         except Exception, e:
             print e      
