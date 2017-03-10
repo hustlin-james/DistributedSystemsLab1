@@ -71,7 +71,7 @@ class ChatServer(threading.Thread):
             if tokens > 1:
                 connect_username = tokens[1]
                 connected_client = get_user_by_username(connect_username)
-                if connected_client != None:
+                if connected_client != None and connected_client.is_online == True and connected_client.username != self.username:
                     client.connected_client = connected_client
                     self.conn.send('## You have been connected to %s \n'%connect_username)
                 else:
@@ -136,7 +136,7 @@ class ChatServer(threading.Thread):
                 username = header_info['msg']
                 logging.info('%s %s %s'%(header_info['request_type'], header_info['date'],header_info['length']))
 
-                if is_username_taken(username):
+                if is_username_taken(username) == True:
                     self.print_indicator(
                         '## This username already exists, please try another')
                 else:
