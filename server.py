@@ -3,6 +3,7 @@ import socket
 import threading
 import time
 import logging
+import sys
 
 HOST = ''
 PORT = 8018
@@ -23,6 +24,7 @@ class Client():
         self.is_online = is_online
         self.last_login = last_login
         self.connected_client = None
+        self.alert_users = []
 
 #Input: None
 #Output: None
@@ -54,6 +56,26 @@ class ChatServer(threading.Thread):
         if buf.find('!q') == 0:
             self.logoff()
 
+        if buf.find('!alert') == 0:
+            tokens = buf.split()
+            if tokens > 1:
+                client = get_user_by_addr(self.addr)
+                alert_username = tokens[1]
+                alert_user = get_user_by_username(alert_username)
+
+                #Check if the alert user is already there
+                alert_exists = False
+                for a in client.alert_users:
+                    if a.username == alert_username:
+                        alert_exists = True
+                        break
+                
+                if alert_user != None and alert_username != client.username and alert_exists == False:
+                    client.alert_users.append(alert_user)
+                    self.conn.send('## You added %s to alert when you sign on. \n'%alert_username)
+                else:
+                    self.conn.send('## cant find user.\n>>')
+
         if buf.find('!disconnect') == 0:
             logging.info('Disconnect Requested')
             client = get_user_by_addr(self.addr)
@@ -69,13 +91,16 @@ class ChatServer(threading.Thread):
             #Split the msg to get the second part which contains the username
             tokens = buf.split()
             if tokens > 1:
-                connect_username = tokens[1]
-                connected_client = get_user_by_username(connect_username)
-                if connected_client != None and connected_client.is_online == True and connected_client.username != self.username:
-                    client.connected_client = connected_client
-                    self.conn.send('## You have been connected to %s \n'%connect_username)
+                if client.connected_client == None:
+                    connect_username = tokens[1]
+                    connected_client = get_user_by_username(connect_username)
+                    if connected_client != None and connected_client.is_online == True and connected_client.username != self.username:
+                        client.connected_client = connected_client
+                        self.conn.send('## You have been connected to %s \n'%connect_username)
+                    else:
+                        self.conn.send('## cant find user.\n>>')
                 else:
-                    self.conn.send('## cant find user.\n>>')
+                    self.conn.send('## you are already connected to a client.\n>>')
             else:
                 self.conn.send('## cant find user.\n>>')
 
@@ -182,6 +207,18 @@ class ChatServer(threading.Thread):
                             '## Welcome back, last login: %s' % c.last_login)
                         c.last_login = time.ctime()
                         c.is_online = True
+                        c.conn = self.conn
+                        c.addr = self.addr
+                        c.connected_client = None
+                        
+                        #Alert users
+                        if len(c.alert_users) > 0:
+                            alert_msg = 'These users are online: '
+                            for a in c.alert_users:
+                                if a.is_online == True:
+                                    alert_msg =  alert_msg + a.username+ '; '
+                            self.print_indicator(alert_msg)
+
                         break
     #Input: Self Object, message to send to client
     #Output: None
@@ -210,6 +247,8 @@ class ChatServer(threading.Thread):
 
         self.login()
 
+        print("login done")
+
         while 1:
             try:
                 self.conn.settimeout(TIMEOUT)
@@ -232,8 +271,12 @@ class ChatServer(threading.Thread):
 #Extracts the header info into a dictionary
 def get_http_header_info(header_str):
     tokens = header_str.split("\n")
-    msg = tokens[len(tokens)-1]
-    return {'msg':msg, 'request_type':tokens[0],'date':tokens[5],'length':tokens[6]}
+
+    if len(tokens) > 6:
+        msg = tokens[len(tokens)-1]
+        return {'msg':msg, 'request_type':tokens[0],'date':tokens[5],'length':tokens[6]}
+    else:
+        return  {'msg':'', 'request_type':'','date':'','length':''}
 
 #The following functions are helpers to find the various clients thats kept track by the server.
 def get_user_by_username(username):
@@ -317,3 +360,6 @@ if __name__ == '__main__':
         main()
     except KeyboardInterrupt:
         print 'Exiting Server Program'
+        for c in clients:
+            c.conn.close()
+        sys.exit()

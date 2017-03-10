@@ -5,6 +5,8 @@ This program only works on a Linux based environment, mainly because I am using 
 allows the program to wait to get messages from the server.  For this to work on windows I would need to
 use the Modify to use the WinSock library.
 
+This lab contains the bonus for multithreading and alerting consenting users that they are online.
+
 To start server:
 
 python server.py
