@@ -1,5 +1,4 @@
 #! /usr/bin/env python
-
 import socket
 import threading
 import time
@@ -8,8 +7,12 @@ import logging
 HOST = ''
 PORT = 8018
 TIMEOUT = 5
-BUF_SIZE = 1024
+BUF_SIZE = 16384
 
+#Input: None
+#Output: None
+#Summary:
+#Represents a client object to be used for functions
 class Client():
     def __init__(self,conn,addr,fake_ip,username,password,is_online,last_login):
         self.conn = conn
@@ -19,41 +22,102 @@ class Client():
         self.password = password
         self.is_online = is_online
         self.last_login = last_login
+        self.connected_client = None
 
+#Input: None
+#Output: None
+#Summary:
+#This is the ChatServer Thread Object that is created when ever a new connection is detected.
+#It contains functions and properties to communication with the client that it represents.
 class ChatServer(threading.Thread):
     def __init__(self, conn, addr):
         threading.Thread.__init__(self)
         self.conn = conn
         self.addr = addr
         self.ip = self.addr[0]
+        self.username = ''
 
+    #Input: self object, string
+    #Output: None
+    #Summary:
+    #Helper method for sending out messages to the client
     def print_indicator(self, prompt):
         self.conn.send('%s\n>> ' % (prompt,))
 
+    #Input: self object, string
+    #Output: None
+    #Summary:
+    #This is to check for special commands that the user can send to the server such as logging and connecting/disconnecting to
+    #a user.  If it finds one of those commands it will run a function to process or it just finishes and the server goes
+    #back to the run loop
     def check_keyword(self, buf):
         if buf.find('!q') == 0:
             self.logoff()
 
+        if buf.find('!disconnect') == 0:
+            logging.info('Disconnect Requested')
+            client = get_user_by_addr(self.addr)
+            if client.connected_client != None: 
+                connected_username = client.connected_client.username
+                client.connected_client.conn.send("*private* %s has disconnected from you. \n>>"%self.username)
+                client.connected_client = None
+                self.conn.send('## You have been disconnected from %s \n>>'%connected_username)
+        
+        if buf.find('!connect') == 0:
+            logging.info('Connect Requested')
+            client = get_user_by_addr(self.addr)
+            #Split the msg to get the second part which contains the username
+            tokens = buf.split()
+            if tokens > 1:
+                connect_username = tokens[1]
+                connected_client = get_user_by_username(connect_username)
+                if connected_client != None:
+                    client.connected_client = connected_client
+                    self.conn.send('## You have been connected to %s \n'%connect_username)
+                else:
+                    self.conn.send('## cant find user.\n>>')
+            else:
+                self.conn.send('## cant find user.\n>>')
+
+    #Input: Self Object
+    #Output: None
+    #Summary:
+    #This function will log the user out by setting the is_online to false.  Thus it never deletes the client 
+    #so that the next time the client will log in the server will remember them.  It then closes the connection.
     def logoff(self):
-        global clients
+        client = get_user_by_addr(self.addr)
+        client.is_online = False
 
-        for c in clients:
-            if c.addr[0] == self.addr[0] and c.addr[1] == self.addr[1]:
-                c.is_online = False
-                break
-
+        if client.connected_client != None:
+            client.connected_client.conn.send("*private* %s has disconnected from you. \n>>"%self.username)
+            client.connected_client = None
+        
+        logging.info('Loggin Off %s:%s,username: %s' %(self.addr[0], self.addr[1],self.username))
         self.conn.send('## Bye!\n')
         self.conn.close()
         exit()
 
+    #Input: Self Object
+    #Output: None
+    #Summary:
+    #This function handles the beginning when the client has connected to the server.  
+    #The fake ip that was passed in is so the server can check for persistent sessions. I use the
+    #fake ip as an unique identifier right when they log in so that I can check if they have an account already.
+    #I can't use the IP and Port because I run this on localhost so all client will have the same IP and the Port changes.
+    #If the server detects that this user hasnt registered then it prompts them for a username and password otherwise
+    #it will just prompt them for a password.  If the user was new it create a client and adds it to the clients global object.
+    #Otherwise it will just find the client in the clients global and set is_online to true.
     def login(self):
         global clients
 
         #Using fake ip to simulate logging in from different IP's
-        fake_ip = self.conn.recv(BUF_SIZE).strip()
+        header_info = get_http_header_info(self.conn.recv(BUF_SIZE).strip())
+        fake_ip = header_info['msg']
+        
         logging.info('Connected from: %s:%s,fake_ip:%s' %(self.addr[0], self.addr[1],fake_ip))
+        logging.info('%s %s %s'%(header_info['request_type'], header_info['date'],header_info['length']))
 
-        msg = '\n## Welcome to Chat\n## Enter `!q` to loggoff\n'
+        msg = '\n## Welcome to Chat\n## Enter `!q` to loggoff. Enter `!connect [username]` to talk to another client and !disconnect to leave. \n'
 
         #Check to see if the user is already signed up
         client = None
@@ -68,7 +132,10 @@ class ChatServer(threading.Thread):
 
             username = ''
             while 1:
-                username = self.conn.recv(BUF_SIZE).strip()
+                header_info =  get_http_header_info(self.conn.recv(BUF_SIZE).strip())
+                username = header_info['msg']
+                logging.info('%s %s %s'%(header_info['request_type'], header_info['date'],header_info['length']))
+
                 if is_username_taken(username):
                     self.print_indicator(
                         '## This username already exists, please try another')
@@ -76,13 +143,18 @@ class ChatServer(threading.Thread):
                     break
             
             self.print_indicator('## Hello %s, please set your password:' % (username,))
-            password = self.conn.recv(BUF_SIZE)
+            header_info = get_http_header_info(self.conn.recv(BUF_SIZE).strip())
+            password = header_info['msg']
+            logging.info('%s %s %s'%(header_info['request_type'], header_info['date'],header_info['length']))
+
             self.print_indicator('## Welcome, enjoy your chat')
 
             logging.info('%s:%s,fake_ip:%s,logged as %s' % (self.addr[0],self.addr[1],fake_ip,username))
 
             c = Client(self.conn,self.addr,fake_ip,username,password,True,time.ctime())
             clients.append(c)
+            self.username = username
+
         else:
             #Check if the user is already online
             c = get_user_fake_ip(fake_ip)
@@ -94,12 +166,14 @@ class ChatServer(threading.Thread):
                 exit()
             else:
                  msg += '## Hello %s, please enter your password:' % (c.username,)
-                 # print accounts
                  self.print_indicator(msg)
                  
                  while 1:
-                    password = self.conn.recv(BUF_SIZE).strip()
-                    c = is_password_correct(c.username,c.password)
+                    header_info = get_http_header_info(self.conn.recv(BUF_SIZE).strip())
+                    password = header_info['msg']
+                    logging.info('%s %s %s'%(header_info['request_type'], header_info['date'],header_info['length']))
+
+                    c = is_password_correct(c.username,password)
                     if c == None:
                         self.print_indicator(
                             '## Incorrect password, please enter again')
@@ -109,23 +183,74 @@ class ChatServer(threading.Thread):
                         c.last_login = time.ctime()
                         c.is_online = True
                         break
+    #Input: Self Object, message to send to client
+    #Output: None
+    #Summary: 
+    #This is just a helper method to do logic on which clients I should send the message.  Whether to send the message
+    #to a private client session or just send it globally.
+    def broadcast(self, msg):
 
+        client = get_user_by_username(self.username)
+
+        #This user has a private message session with another user
+        #else the user has no private session so output globally
+        if client.connected_client != None:
+            client.connected_client.conn.send('*private* %s \n>>'%(msg))
+            self.conn.send('>>')
+        else:
+            for c in clients:
+                c.conn.send(msg + '\n>>')
+    #Input: self object
+    #Output: None
+    #Summary:
+    #This run function gets called whenever a new thread is created.  It will then attempt to using the connection
+    #information to login/register the user and afterwards it will constantly listen to the client socket for messages.
     def run(self):
         global clients
-        
+
         self.login()
+
         while 1:
             try:
                 self.conn.settimeout(TIMEOUT)
-                buf = self.conn.recv(BUF_SIZE).strip()
-                logging.info('%s:%s, msg: %s' % (self.name, self.addr[0],self.addr[1], buf))
+                header_info = get_http_header_info(self.conn.recv(BUF_SIZE).strip())
+                buf = header_info['msg']
+
+                logging.info('%s %s %s'%(header_info['request_type'], header_info['date'],header_info['length']))
+                logging.info('%s:%s, msg: %s' % (self.addr[0],self.addr[1], buf))
                 # check features
                 if not self.check_keyword(buf):
                     # client broadcasts message to all
-                    self.broadcast('%s: %s' % (self.name, buf), clients)
+                    self.broadcast('%s: %s' % (self.username, buf))
             except Exception, e:
                 # Connection Timed out
                 pass
+
+#Input: header string
+#Output: header string info as a dictionary
+#Summary: 
+#Extracts the header info into a dictionary
+def get_http_header_info(header_str):
+    tokens = header_str.split("\n")
+    msg = tokens[len(tokens)-1]
+    return {'msg':msg, 'request_type':tokens[0],'date':tokens[5],'length':tokens[6]}
+
+#The following functions are helpers to find the various clients thats kept track by the server.
+def get_user_by_username(username):
+    my_client = None
+    for c in clients:
+        if c.username == username:
+            my_client = c
+            break
+    return my_client
+
+def get_user_by_addr(addr):
+    my_client = None
+    for c in clients:
+        if c.addr[0] == addr[0] and c.addr[1] == addr[1]:
+            my_client = c
+            break
+    return my_client
 
 def get_user_fake_ip(fake_ip):
     my_client = None
@@ -159,6 +284,10 @@ def is_username_taken(username):
             break
     return is_taken
 
+#Input: None
+#Output: None
+#Summary:
+#Sets up the host and port the server will listen to and constantly listens for connections.
 def main():
     global clients
     clients = []

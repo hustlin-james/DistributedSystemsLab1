@@ -51,7 +51,7 @@ class WhatsUpServer(threading.Thread):
 
         logging.info('Connected from: %s:%s' %
                      (self.addr[0], self.addr[1]))
-                     
+
         clients.add((self.conn, self.addr))
 
         msg = '\n## Welcome to WhatsUp\n## Enter `!q` to quit\n'
@@ -78,6 +78,7 @@ class WhatsUpServer(threading.Thread):
                         '## This name already exists, please try another')
                 else:
                     break
+                    
             accounts[self.ip]['name'] = name
             self.name = name
             logging.info('%s logged as %s' % (self.addr[0], self.name))
