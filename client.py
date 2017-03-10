@@ -1,44 +1,11 @@
-#! /usr/bin/env python
-# coding: utf-8
-#
-# WhatsUp Client
-# Yet another simple socket multi-user chating program
-#
-#
-# @author: Xin Wang <sutarshow#gmail.com>
-# @date: 18-09-2013
-#
+# chat_client.py
 
-import socket
-import time
-import logging
 import sys
+import socket
+import select
 import random
-
-HOST = '127.0.0.1'
-PORT = 8018
-TIMEOUT = 5
-BUF_SIZE = 1024
-
-class ChatClient():
-    def __init__(self, host=HOST, port=PORT,fake_ip_id=''):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((host, port))
-        logging.info('Connecting to %s:%s' % (host, port))
-
-        self.sock.send(fake_ip_id)
-
-        while 1:
-            try:
-                buf = self.sock.recv(BUF_SIZE)
-                sys.stdout.write(buf)
-                cmd = raw_input()
-                if cmd.strip() == '!q':
-                    sys.exit(1)
-                self.sock.send(cmd)
-            except:
-                self.sock.close()
-
+ 
+BUFFER_SIZE = 4096
 def gen_fake_ip_id():
     my_str = '127.'
     my_str = my_str + str(random.randint(0,9)) + '.'
@@ -47,17 +14,66 @@ def gen_fake_ip_id():
 
     return my_str
 
-def main():
-    logging.basicConfig(level=logging.INFO,
-                        format='[%(asctime)s] %(levelname)s: %(message)s',
-                        datefmt='%d/%m/%Y %I:%M:%S %p')    
+def chat_client():
 
-    fake_ip_id =gen_fake_ip_id()
-    
-    if len(sys.argv) > 1:
+    print 'Usage : python chat_client.py hostname port'
+    host = '127.0.0.1'
+    port = 8018
+    fake_ip_id = gen_fake_ip_id()
+
+    if len(sys.argv) == 3:
+        host = sys.argv[1]
+        port = int(sys.argv[2])
+
+    if len(sys.argv) == 2:
         fake_ip_id = sys.argv[1]
+     
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(2)
+     
+    # connect to remote host
+    try :
+        s.connect((host, port))
+    except :
+        print 'Unable to connect'
+        sys.exit()
+     
 
-    chat_client = ChatClient(fake_ip_id=fake_ip_id)
+    print 'Connected to remote host.'
+    print 'unique ip: %s'%(fake_ip_id)
 
-if __name__ == '__main__':
-    main()
+    s.send(fake_ip_id)
+     
+    while 1:
+
+        try:
+
+            socket_list = [sys.stdin, s]
+            # Get the list sockets which are readable
+            ready_to_read,ready_to_write,in_error = select.select(socket_list , [], [])
+            
+            for sock in ready_to_read:             
+                if sock == s:
+                    # incoming message from remote server, s
+                    data = sock.recv(BUFFER_SIZE)
+                    if not data :
+                        print '\nDisconnected from chat server'
+                        sys.exit()
+                    else :
+                        #print data
+                        sys.stdout.write(data)
+                        sys.stdout.write('[Me] '); 
+                        sys.stdout.flush()     
+                
+                else :
+                    # user entered a message
+                    msg = sys.stdin.readline()
+                    s.send(msg)
+                    sys.stdout.write('[Me] '); sys.stdout.flush() 
+        except:
+            sys.exit(0)
+
+
+if __name__ == "__main__":
+
+    sys.exit(chat_client())

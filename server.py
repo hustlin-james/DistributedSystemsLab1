@@ -1,23 +1,5 @@
 #! /usr/bin/env python
 
-# coding: utf-8
-#
-
-# WhatsUp Server
-#
-
-# Yet another simple socket multi-user chating program
-
-# Please use `telnet IP PORT` to log in
-#
-
-# @author:   Xin Wang <sutarshow#gmail.com>
-
-# @version:  1.0
-
-# @since:    16-09-2013
-#
-
 import socket
 import threading
 import time
@@ -28,268 +10,181 @@ PORT = 8018
 TIMEOUT = 5
 BUF_SIZE = 1024
 
-class WhatsUpServer(threading.Thread):
+class Client():
+    def __init__(self,conn,addr,fake_ip,username,password,is_online,last_login):
+        self.conn = conn
+        self.addr = addr
+        self.fake_ip = fake_ip
+        self.username = username
+        self.password = password
+        self.is_online = is_online
+        self.last_login = last_login
 
+class ChatServer(threading.Thread):
     def __init__(self, conn, addr):
         threading.Thread.__init__(self)
         self.conn = conn
         self.addr = addr
         self.ip = self.addr[0]
 
-        self.fake_ip_id = 'test'
-        print(self.addr)
-        self.name = ''
-
     def print_indicator(self, prompt):
         self.conn.send('%s\n>> ' % (prompt,))
 
-    def login(self):
-        global clients
-        global messages
-        global accounts
-        global onlines
-
-        logging.info('Connected from: %s:%s' %
-                     (self.addr[0], self.addr[1]))
-        clients.add((self.conn, self.addr))
-        msg = '\n## Welcome to WhatsUp\n## Enter `!q` to quit\n'
-
-        fake_ip = self.conn.recv(BUF_SIZE).strip()
-        print("FAKE IP")
-        print(fake_ip)
-
-        # new user
-        print accounts
-        #if self.ip not in accounts:
-        if True:
-            msg += '## Please enter your name:'
-            self.print_indicator(msg)
-            accounts[self.ip] = {
-                'name': '',
-                'pass': '',
-                'lastlogin': time.ctime()
-            }
-            while 1:
-                name = self.conn.recv(BUF_SIZE).strip()
-                if name in messages:
-                    self.print_indicator(
-                        '## This name already exists, please try another')
-                else:
-                    break
-            accounts[self.ip]['name'] = name
-            self.name = name
-            logging.info('%s logged as %s' % (self.addr[0], self.name))
-            messages[name] = []
-            self.print_indicator(
-                '## Hello %s, please enter your password:' % (self.name,))
-            password = self.conn.recv(BUF_SIZE)
-            accounts[self.ip]['pass'] = password.strip()
-            self.print_indicator('## Welcome, enjoy your chat')
-        else:
-            self.name = accounts[self.ip]['name']
-            msg += '## Hello %s, please enter your password:' % (self.name,)
-            # print accounts
-            self.print_indicator(msg)
-            while 1:
-                password = self.conn.recv(BUF_SIZE).strip()
-                if password != accounts[self.ip]['pass']:
-                    self.print_indicator(
-                        '## Incorrect password, please enter again')
-                else:
-                    self.print_indicator(
-                        '## Welcome back, last login: %s' %
-                        (accounts[self.ip]['lastlogin'],))
-                    accounts[self.ip]['lastlogin'] = time.ctime()
-                    break
-            self.conn.send(self.show_mentions(self.name))
-
-
-        self.broadcast('`%s` is online now' % (self.name,), clients, False)
-        onlines[self.name] = self.conn
-
-    def logoff(self):
-        global clients
-        global onlines
-        self.conn.send('## Bye!\n')
-        del onlines[self.name]
-        clients.remove((self.conn, self.addr))
-        if onlines:
-            self.broadcast('## `%s` is offline now' %
-                           (self.name,), clients)
-        self.conn.close()
-        exit()
-
     def check_keyword(self, buf):
-        global onlines
-
         if buf.find('!q') == 0:
             self.logoff()
 
-        if buf.find('#') == 0:
-            group_keyword = buf.split(' ')[0][1:]
-            group_component = group_keyword.split(':')
+    def logoff(self):
+        global clients
 
-            # to post in a group
-            if len(group_component) == 1:
-                group_name = group_component[0]
-                try:
-                    msg = '[%s]%s: %s' % (
-                        group_name, self.name, buf.split(' ', 1)[1])
-                    self.group_post(group_name, msg)
-                except IndexError:
+        for c in clients:
+            if c.addr[0] == self.addr[0] and c.addr[1] == self.addr[1]:
+                c.is_online = False
+                break
+
+        self.conn.send('## Bye!\n')
+        self.conn.close()
+        exit()
+
+    def login(self):
+        global clients
+
+        #Using fake ip to simulate logging in from different IP's
+        fake_ip = self.conn.recv(BUF_SIZE).strip()
+        logging.info('Connected from: %s:%s,fake_ip:%s' %(self.addr[0], self.addr[1],fake_ip))
+
+        msg = '\n## Welcome to Chat\n## Enter `!q` to loggoff\n'
+
+        #Check to see if the user is already signed up
+        client = None
+        for c in clients:
+            if c.fake_ip == fake_ip:
+                client = c
+        
+        #If client is None then he is not in the list of users and we have to register him
+        if client is None:
+            msg += '## Please enter your username:'
+            self.print_indicator(msg)
+
+            username = ''
+            while 1:
+                username = self.conn.recv(BUF_SIZE).strip()
+                if is_username_taken(username):
                     self.print_indicator(
-                        '## What do you want to do with `#%s`?' % (group_name))
+                        '## This username already exists, please try another')
+                else:
+                    break
+            
+            self.print_indicator('## Hello %s, please set your password:' % (username,))
+            password = self.conn.recv(BUF_SIZE)
+            self.print_indicator('## Welcome, enjoy your chat')
 
-            # to join / leave a group
-            elif len(group_component) == 2:
-                group_name = group_component[0]
-                if group_component[1] == 'join':
-                    self.group_join(group_name)
-                elif group_component[1] == 'leave':
-                    self.group_leave(group_name)
-            return True
+            logging.info('%s:%s,fake_ip:%s,logged as %s' % (self.addr[0],self.addr[1],fake_ip,username))
 
-        if buf.find('@') == 0:
-            to_user = buf.split(' ')[0][1:]
-            from_user = self.name
-            msg = buf.split(' ', 1)[1]
-
-            # if user is online
-            if to_user in onlines:
-                onlines[to_user].send('@%s: %s\n>> ' % (from_user, msg))
-                self.mention(from_user, to_user, msg, 1)
-            # offline
-            else:
-                self.mention(from_user, to_user, msg)
-            return True
-
-    def group_post(self, group_name, msg):
-        global groups
-        # if the group does not exist, create it
-        groups.setdefault(group_name, set())
-
-        # if current user is a member of the group
-        if (self.conn, self.addr) in groups[group_name]:
-            self.broadcast(msg, groups[group_name])
+            c = Client(self.conn,self.addr,fake_ip,username,password,True,time.ctime())
+            clients.append(c)
         else:
-            self.print_indicator(
-                '## You are current not a member of group `%s`' % (group_name,))
+            #Check if the user is already online
+            c = get_user_fake_ip(fake_ip)
+            self.username = c.username
 
-    def group_join(self, group_name):
-        global groups
-        groups.setdefault(group_name, set())
-        groups[group_name].add((self.conn, self.addr))
-        self.print_indicator('## You have joined the group `%s`' %
-                             (group_name,))
-
-    def group_leave(self, group_name):
-        global groups
-        try:
-            groups[group_name].remove((self.conn, self.addr))
-            self.print_indicator('## You have left the group `%s`' %
-                                 (group_name,))
-        except Exception, e:
-            pass
-
-    def mention(self, from_user, to_user, msg, read=0):
-        global messages
-        # print 'Messages', messages
-        if to_user in messages:
-            messages[to_user].append([from_user, msg, read])
-            self.print_indicator('## Message has sent to %s' % (to_user,))
-        else:
-            self.print_indicator('## No such user named `%s`' % (to_user,))
-
-    def show_mentions(self, name):
-        global messages
-        res = '## Here are your messages:\n'
-        if not messages[name]:
-            res += '   No messages available\n>> '
-            return res
-        for msg in messages[name]:
-            if msg[2] == 0:
-                res += '(NEW) %s: %s\n' % (msg[0], msg[1])
-                msg[2] = 1
+            if is_user_online(c.username) == True:
+                self.conn.send('## You are already online!\n')
+                self.conn.close()
+                exit()
             else:
-                res += '      %s: %s\n' % (msg[0], msg[1])
-        res += '>> '
-        return res
-
-    def broadcast(self, msg, receivers, to_self=True):
-        print("broadcast")
-        print(receivers)
-
-
-        for conn, addr in receivers:
-            # if the client is not the current user
-            #if addr[0] != self.ip:
-            #    print("not current user")
-            #    conn.send(msg + '\n>> ')
-            # if current user
-            #else:
-            #    print("current user")
-            #    self.conn.send('>> ') if to_self else self.conn.send('')
-            conn.send(msg + '\n>> ')
+                 msg += '## Hello %s, please enter your password:' % (c.username,)
+                 # print accounts
+                 self.print_indicator(msg)
+                 
+                 while 1:
+                    password = self.conn.recv(BUF_SIZE).strip()
+                    c = is_password_correct(c.username,c.password)
+                    if c == None:
+                        self.print_indicator(
+                            '## Incorrect password, please enter again')
+                    else:
+                        self.print_indicator(
+                            '## Welcome back, last login: %s' % c.last_login)
+                        c.last_login = time.ctime()
+                        c.is_online = True
+                        break
 
     def run(self):
-        global messages
-        global accounts
         global clients
+        
         self.login()
-
         while 1:
             try:
                 self.conn.settimeout(TIMEOUT)
                 buf = self.conn.recv(BUF_SIZE).strip()
-                logging.info('%s@%s: %s' % (self.name, self.addr[0], buf))
+                logging.info('%s:%s, msg: %s' % (self.name, self.addr[0],self.addr[1], buf))
                 # check features
                 if not self.check_keyword(buf):
                     # client broadcasts message to all
                     self.broadcast('%s: %s' % (self.name, buf), clients)
-
             except Exception, e:
-                # timed out
+                # Connection Timed out
                 pass
+
+def get_user_fake_ip(fake_ip):
+    my_client = None
+    for c in clients:
+        if c.fake_ip == fake_ip:
+            my_client = c
+            break
+    return my_client
+
+def is_password_correct(username,password):
+    my_client = None
+    for c in clients:
+        if c.username == username and c.password == password:
+            my_client = c
+            break
+    return my_client
+
+def is_user_online(username):
+    is_online = False
+    for c in clients:
+        if c.username == username and c.is_online == True:
+            is_online = True
+            break
+    return is_online
+
+def is_username_taken(username):
+    is_taken = False
+    for c in clients:
+        if c.username == username:
+            is_taken = True
+            break
+    return is_taken
 
 def main():
     global clients
-    global messages
-    global accounts
-    global onlines
-    global groups
+    clients = []
 
     # logging setup
     logging.basicConfig(level=logging.INFO,
                         format='[%(asctime)s] %(levelname)s: %(message)s',
                         datefmt='%d/%m/%Y %I:%M:%S %p')
-
-    # initialize global vars
-    clients = set()
-    messages = {}
-    accounts = {}
-    onlines = {}
-    groups = {}
-
     # set up socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((HOST, PORT))
     sock.listen(5)
-    print '-= WhatsUp Server =-'
+    print '-= Chat Server Started =-'
     print '>> Listening on:', PORT
-    print '>> Author: Xin Wang'
-    print ''
-
+    
     while 1:
         try:
             conn, addr = sock.accept()
-            server = WhatsUpServer(conn, addr)
+            server = ChatServer(conn, addr)
             server.start()
         except Exception, e:
-            print e
+            print e      
 
 if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print 'Quited'
+        print 'Exiting Server Program'
